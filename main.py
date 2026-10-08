@@ -1,5 +1,6 @@
 import os
 import asyncio
+import re
 from aiohttp import web
 from telethon import TelegramClient, events
 
@@ -8,24 +9,37 @@ API_ID = 36378979
 API_HASH = 'c74ff922f82543daf2e14e7468b2a9b0'
 BOT_TOKEN = '8961588391:AAHDllCXuFPj0UsgitPcvxrsDwZtMRQYMtg'
 
-# Chat IDs extracted from your raw data
+# Chat IDs
 SOURCE_CHAT = -1002369799233  # KING ARMY
 DEST_CHAT = -1002199309542    # MAANWIN (TAMIL)
-
-client = TelegramClient('bot_session', API_ID, API_HASH)
-
-@client.on(events.NewMessage(chats=SOURCE_CHAT))
-async def forwarder(event):
-    try:
-        await client.send_message(DEST_CHAT, event.message)
-        print("Message forwarded successfully!")
-    except Exception as e:
-        print(f"Failed to forward message: {e}")
 
 async def health_check(request):
     return web.Response(text="Forwarder is actively running 24/7!")
 
 async def main():
+    client = TelegramClient('bot_session', API_ID, API_HASH)
+    
+    @client.on(events.NewMessage(chats=SOURCE_CHAT))
+    async def forwarder(event):
+        try:
+            # Extract the text (or caption if it's a photo/video)
+            text = event.message.text or ""
+            
+            # Find any links and replace them with nothing (erasing them)
+            # \S+ ensures it deletes the whole URL until the next space
+            clean_text = re.sub(r'(https?://\S+|www\.\S+|t\.me/\S+)', '', text, flags=re.IGNORECASE)
+            
+            # Send as a brand NEW message to remove the "Forwarded from" tag
+            await client.send_message(
+                DEST_CHAT, 
+                message=clean_text.strip(), 
+                file=event.message.media
+            )
+            print("Message copied successfully with links removed!")
+            
+        except Exception as e:
+            print(f"Failed to copy message: {e}")
+
     # Start the Telegram bot
     await client.start(bot_token=BOT_TOKEN)
     print("Bot logged in and listening for messages...")
@@ -45,5 +59,5 @@ async def main():
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(main())
+    # Safely start the event loop
+    asyncio.run(main())
