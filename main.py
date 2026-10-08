@@ -22,20 +22,32 @@ async def main():
     @client.on(events.NewMessage(chats=SOURCE_CHAT))
     async def forwarder(event):
         try:
-            # Extract the text (or caption if it's a photo/video)
+            # Extract the raw text or media caption
             text = event.message.text or ""
             
-            # Find any links and replace them with nothing (erasing them)
-            # \S+ ensures it deletes the whole URL until the next space
-            clean_text = re.sub(r'(https?://\S+|www\.\S+|t\.me/\S+)', '', text, flags=re.IGNORECASE)
+            # Aggressive Regex: Targets https://, http://, www., t.me, telegram.me, and @usernames
+            clean_text = re.sub(
+                r'(https?://\S+|www\.\S+|t\.me\S+|telegram\.me\S+|@[a-zA-Z0-9_]+)', 
+                '', 
+                text, 
+                flags=re.IGNORECASE
+            )
             
-            # Send as a brand NEW message to remove the "Forwarded from" tag
+            # Clean up formatting: Remove large empty gaps left behind by deleted links
+            clean_text = re.sub(r'\n\s*\n', '\n\n', clean_text).strip()
+            
+            # Safety check: If the message was ONLY a link, skip sending an empty text block
+            if not clean_text and not event.message.media:
+                print("Message contained only a link. Skipping to prevent empty message errors.")
+                return
+
+            # Send the cleaned paragraph as a brand new message (no forward tag)
             await client.send_message(
                 DEST_CHAT, 
-                message=clean_text.strip(), 
+                message=clean_text, 
                 file=event.message.media
             )
-            print("Message copied successfully with links removed!")
+            print("Message copied successfully with all links completely erased!")
             
         except Exception as e:
             print(f"Failed to copy message: {e}")
