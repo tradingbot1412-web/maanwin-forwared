@@ -3,6 +3,7 @@ import asyncio
 import re
 from aiohttp import web
 from telethon import TelegramClient, events
+from telethon.extensions import html  # <-- This is the magic tool for Premium Emojis
 
 # Credentials
 API_ID = 36378979
@@ -22,32 +23,45 @@ async def main():
     @client.on(events.NewMessage(chats=SOURCE_CHAT))
     async def forwarder(event):
         try:
-            # Extract the raw text or media caption
-            text = event.message.text or ""
+            # Get raw text and formatting entities (this contains the premium emojis)
+            raw_text = event.message.message or ""
+            entities = event.message.entities
             
-            # Aggressive Regex: Targets https://, http://, www., t.me, telegram.me, and @usernames
-            clean_text = re.sub(
-                r'(https?://\S+|www\.\S+|t\.me\S+|telegram\.me\S+|@[a-zA-Z0-9_]+)', 
-                '', 
-                text, 
-                flags=re.IGNORECASE
-            )
+            # Convert the message to HTML to preserve Bold, Italics, and Premium Emojis
+            html_text = html.unparse(raw_text, entities)
             
-            # Clean up formatting: Remove large empty gaps left behind by deleted links
-            clean_text = re.sub(r'\n\s*\n', '\n\n', clean_text).strip()
+            # Remove inline hyperlink tags (e.g., if words are hyperlinked)
+            clean_html = re.sub(r'<a[^>]*>.*?</a>', '', html_text, flags=re.IGNORECASE)
             
-            # Safety check: If the message was ONLY a link, skip sending an empty text block
-            if not clean_text and not event.message.media:
-                print("Message contained only a link. Skipping to prevent empty message errors.")
+            # Safely remove URLs without accidentally deleting surrounding HTML tags [^\s<]+
+            clean_html = re.sub(r'https?://[^\s<]+', '', clean_html, flags=re.IGNORECASE)
+            clean_html = re.sub(r'www\.[^\s<]+', '', clean_html, flags=re.IGNORECASE)
+            clean_html = re.sub(r't\.me/[^\s<]+', '', clean_html, flags=re.IGNORECASE)
+            clean_html = re.sub(r'telegram\.me/[^\s<]+', '', clean_html, flags=re.IGNORECASE)
+            clean_html = re.sub(r'@[a-zA-Z0-9_]+', '', clean_html)
+            
+            # Clean up extra blank lines
+            clean_html = re.sub(r'\n\s*\n', '\n\n', clean_html).strip()
+            
+            # Ensure we only forward real files, NOT Web Page Previews
+            actual_media = event.message.media
+            if hasattr(actual_media, 'webpage'):
+                actual_media = None
+                
+            # Safety check
+            if not clean_html and not actual_media:
+                print("Message was only a link. Skipped.")
                 return
 
-            # Send the cleaned paragraph as a brand new message (no forward tag)
+            # Send the cleaned HTML message (Telegram turns the HTML back into premium emojis)
             await client.send_message(
                 DEST_CHAT, 
-                message=clean_text, 
-                file=event.message.media
+                message=clean_html, 
+                file=actual_media,
+                parse_mode='html',  # <-- This tells Telegram to render the emojis
+                link_preview=False
             )
-            print("Message copied successfully with all links completely erased!")
+            print("Message copied successfully with Premium Emojis preserved!")
             
         except Exception as e:
             print(f"Failed to copy message: {e}")
@@ -56,7 +70,7 @@ async def main():
     await client.start(bot_token=BOT_TOKEN)
     print("Bot logged in and listening for messages...")
 
-    # Start the web server for Render / UptimeRobot
+    # Start the web server
     app = web.Application()
     app.router.add_get('/', health_check)
     runner = web.AppRunner(app)
@@ -67,9 +81,8 @@ async def main():
     await site.start()
     print(f"Web server is live on port {port}")
 
-    # Keep the script running continuously
+    # Keep running
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
-    # Safely start the event loop
     asyncio.run(main())
