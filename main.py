@@ -22,37 +22,21 @@ async def main():
     @client.on(events.NewMessage(chats=SOURCE_CHAT))
     async def forwarder(event):
         try:
-            # If the message has no text, just copy it cleanly
-            if not event.message.message:
-                await client.send_message(DEST_CHAT, event.message)
-                return
-
-            # THE BLANK SPACE TRICK: Replace links with blank spaces of the exact same length.
-            # This guarantees the hidden Premium Emoji coordinates never shift or break.
-            def replace_with_spaces(match):
-                return ' ' * len(match.group(0))
-
-            clean_text = re.sub(
-                r'(https?://[^\s]+|www\.[^\s]+|t\.me/[^\s]+|telegram\.me/[^\s]+|@[a-zA-Z0-9_]+)', 
-                replace_with_spaces, 
-                event.message.message, 
-                flags=re.IGNORECASE
-            )
+            # Extract the text (or caption if it's a photo/video)
+            text = event.message.text or ""
             
-            # Apply the blanked-out text directly back to the original message object
-            event.message.message = clean_text
+            # Check if the text contains any links (http, https, www, or t.me)
+            if re.search(r'(https?://|www\.|t\.me/)', text, re.IGNORECASE):
+                print("Message contains a link. Skipping.")
+                return # Stops the bot from sending this message
             
-            # Delete any hidden blue webpage preview cards
-            if hasattr(event.message.media, 'webpage'):
-                event.message.media = None
-                
-            # Send the exact structural copy (No forward tags, links erased, emojis untouched)
+            # Send as a brand NEW message to remove the "Forwarded from" tag
             await client.send_message(
                 DEST_CHAT, 
-                event.message, 
-                link_preview=False
+                message=text, 
+                file=event.message.media
             )
-            print("Message copied successfully with structural emoji preservation!")
+            print("Message copied successfully (no forward tag)!")
             
         except Exception as e:
             print(f"Failed to copy message: {e}")
@@ -72,7 +56,9 @@ async def main():
     await site.start()
     print(f"Web server is live on port {port}")
 
+    # Keep the script running continuously
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
+    # Safely start the event loop
     asyncio.run(main())
